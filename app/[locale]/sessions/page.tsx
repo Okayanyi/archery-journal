@@ -1,4 +1,4 @@
-import ParticipantsClient from "./participants-client";
+import SessionsClient from "./sessions-client";
 
 export default async function Page({
   params,
@@ -6,5 +6,5 @@ export default async function Page({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  return <ParticipantsClient locale={locale} />;
+  return <SessionsClient locale={locale} />;
 }
