@@ -109,30 +109,30 @@ export default function ParticipantsClient({ locale }: { locale: string }) {
         };
 
   return (
-    <main className="mx-auto max-w-3xl p-6 space-y-6">
+    <main className="mx-auto max-w-3xl p-6 space-y-6 text-gray-100">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">{t.title}</h1>
-        <p className="text-sm text-gray-600">{t.hint}</p>
+<h1 className="text-2xl font-semibold text-white">{t.title}</h1>
+<p className="text-sm text-gray-400">{t.hint}</p>
       </header>
 
-      <section className="rounded-2xl border bg-white p-4">
+      <section className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
         <form onSubmit={addAthlete} className="flex gap-2">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t.placeholder}
-            className="flex-1 rounded-xl border px-3 py-2 outline-none focus:ring"
+            className="flex-1 rounded-xl border border-gray-700 bg-gray-800 text-white px-3 py-2 outline-none focus:ring focus:ring-gray-600 placeholder:text-gray-400"
           />
           <button
             type="submit"
-            className="rounded-xl border px-4 py-2 hover:bg-gray-50"
+            className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-2 text-white hover:bg-gray-700"
           >
             {t.add}
           </button>
         </form>
       </section>
 
-      <section className="rounded-2xl border bg-white p-4">
+      <section className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-medium">{t.list}</h2>
           <span className="text-sm text-gray-600">{sorted.length}</span>
@@ -140,7 +140,7 @@ export default function ParticipantsClient({ locale }: { locale: string }) {
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-gray-700">
+            <thead className="text-left text-gray-200">
               <tr className="border-b">
                 <th className="py-2 pr-4">Name</th>
                 <th className="py-2 pr-4">Added</th>
@@ -149,15 +149,15 @@ export default function ParticipantsClient({ locale }: { locale: string }) {
             </thead>
             <tbody>
               {sorted.map((a) => (
-                <tr key={a.id} className="border-b last:border-b-0">
+                <tr key={a.id} className="border-b border-gray-800 last:border-b-0">
                   <td className="py-2 pr-4">{a.name}</td>
-                  <td className="py-2 pr-4 text-gray-600">
+                  <td className="py-2 pr-4 text-gray-400">
                     {new Date(a.createdAt).toLocaleString()}
                   </td>
                   <td className="py-2 pr-4 text-right">
                     <button
                       onClick={() => removeAthlete(a.id)}
-                      className="rounded-lg border px-3 py-1 hover:bg-gray-50"
+                      className="rounded-lg border border-gray-700 px-3 py-1 text-gray-200 hover:bg-gray-800"
                       title="Delete"
                     >
                       ✕
@@ -168,7 +168,7 @@ export default function ParticipantsClient({ locale }: { locale: string }) {
 
               {sorted.length === 0 && (
                 <tr>
-                  <td className="py-6 text-gray-600" colSpan={3}>
+                  <td className="py-6 text-gray-400" colSpan={3}>
                     {t.empty}
                   </td>
                 </tr>
