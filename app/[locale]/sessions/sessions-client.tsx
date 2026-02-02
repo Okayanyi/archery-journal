@@ -601,7 +601,7 @@ export default function SessionsClient({ locale }: { locale: string }) {
                       <div className="text-xs text-gray-400 mt-1">{s.notes}</div>
                     ) : null}
                   </td>
-                  <td className="py-3 px-4 whitespace-nowrap text-gray-800">
+                  <td className="py-3 px-4 whitespace-nowrap text-gray-400">
                     <div>
                       {s.distance}m · {s.environment === "indoor" ? t.indoor : t.outdoor}
                     </div>
