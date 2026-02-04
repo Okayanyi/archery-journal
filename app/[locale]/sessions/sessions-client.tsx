@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+
 
 /* =======================
    Types
@@ -15,6 +16,17 @@ type Athlete = {
 type ScoringMode = "normal" | "hitsOnly" | "centerOnly";
 type Environment = "indoor" | "outdoor";
 
+type SetResult = {
+  hits: number;   // попадания НЕ в центр
+  center: number; // попадания в центр
+};
+
+type ParticipantResults = {
+  athleteId: string;
+  sets: SetResult[]; // длина = setsCount
+};
+
+
 type SessionParticipant = {
   athleteId: string;
   target: "head" | "belly";
@@ -25,7 +37,9 @@ type Session = {
   date: string; // YYYY-MM-DD
   title?: string; // optional, but unique if present
   notes?: string;
-
+  
+  results: ParticipantResults[];
+  
   distance: number;
   environment: Environment;
   setsCount: number;
@@ -37,6 +51,8 @@ type Session = {
   createdAt: string; // ISO
 };
 
+
+
 /* =======================
    Helpers
 ======================= */
@@ -46,11 +62,35 @@ function uid() {
 }
 
 const ATHLETES_KEY = "archery.athletes.v1";
+const SESSIONS_KEY = "archery.sessions.v1";
 const distanceSuggestions = [18, 35, 50, 70, 90, 120, 150] as const;
 
 function defaultModeForDistance(distance: number): ScoringMode {
   return distance >= 70 ? "hitsOnly" : "normal";
 }
+
+function centerValue(scoringMode: ScoringMode, target: "head" | "belly") {
+  if (scoringMode === "centerOnly") return 1;
+  if (scoringMode === "hitsOnly") return 0;
+  return target === "head" ? 3 : 2;
+}
+
+function hitValue(scoringMode: ScoringMode) {
+  return scoringMode === "centerOnly" ? 0 : 1;
+}
+
+function calcSetScore(
+  scoringMode: ScoringMode,
+  target: "head" | "belly",
+  set: SetResult
+) {
+  const hv = hitValue(scoringMode);
+  const cv = centerValue(scoringMode, target);
+  const hits = scoringMode === "centerOnly" ? 0 : set.hits;
+  const center = scoringMode === "hitsOnly" ? 0 : set.center;
+  return hits * hv + center * cv;
+}
+
 
 /* =======================
    i18n (minimal)
@@ -199,7 +239,34 @@ export default function SessionsClient({ locale }: { locale: string }) {
   const today = new Date().toISOString().slice(0, 10);
 
   // Sessions list (in-memory)
-  const [sessions, setSessions] = useState<Session[]>([]);
+const [sessions, setSessions] = useState<Session[]>([]);
+const didLoadSessionsRef = useRef(false);
+
+// load once (after mount)
+useEffect(() => {
+  try {
+    const raw = window.localStorage.getItem(SESSIONS_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) setSessions(parsed);
+  } catch {
+    // ignore
+  } finally {
+    // важно: ставим флаг ПОСЛЕ попытки загрузки
+    didLoadSessionsRef.current = true;
+  }
+}, []);
+
+// save (only after initial load finished)
+useEffect(() => {
+  if (!didLoadSessionsRef.current) return;
+  try {
+    window.localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  } catch {
+    // ignore
+  }
+}, [sessions]);
 
   // Form state
   const [date, setDate] = useState(today);
@@ -216,6 +283,12 @@ export default function SessionsClient({ locale }: { locale: string }) {
   useEffect(() => {
     if (!modeTouched) setMode(defaultModeForDistance(distance));
   }, [distance, modeTouched]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const activeSession = useMemo(
+  () => sessions.find((s) => s.id === activeSessionId) ?? null,
+  [sessions, activeSessionId]
+);
+
 
   // Participants picker
   const [selected, setSelected] = useState<Record<string, SessionParticipant>>(
@@ -300,6 +373,14 @@ export default function SessionsClient({ locale }: { locale: string }) {
       scoringMode: mode,
       participants: participantsArr,
       createdAt: new Date().toISOString(),
+      results: participantsArr.map((p) => ({
+  athleteId: p.athleteId,
+  sets: Array.from({ length: Math.max(1, Math.floor(setsCount)) }, () => ({
+    hits: 0,
+    center: 0,
+  })),
+})),
+
     };
 
     setSessions((prev) => [newSession, ...prev]);
@@ -310,7 +391,30 @@ export default function SessionsClient({ locale }: { locale: string }) {
     setSelected({});
     setAthleteQuery("");
   }
+function updateSetValue(
+  sessionId: string,
+  athleteId: string,
+  setIndex: number,
+  field: "hits" | "center",
+  value: number
+) {
+  setSessions((prev) =>
+    prev.map((s) => {
+      if (s.id !== sessionId) return s;
 
+      const results = s.results.map((r) => {
+        if (r.athleteId !== athleteId) return r;
+        const sets = r.sets.map((st, i) => {
+          if (i !== setIndex) return st;
+          return { ...st, [field]: Math.max(0, Math.floor(value)) };
+        });
+        return { ...r, sets };
+      });
+
+      return { ...s, results };
+    })
+  );
+}
   function removeSession(id: string) {
     setSessions((prev) => prev.filter((s) => s.id !== id));
   }
@@ -579,7 +683,6 @@ export default function SessionsClient({ locale }: { locale: string }) {
           <h2 className="font-medium">{t.created}</h2>
           <span className="text-sm text-gray-400">{sortedSessions.length}</span>
         </div>
-
         <div className="overflow-x-auto rounded-xl border border-gray-800">
           <table className="w-full text-sm">
             <thead className="bg-gray-950 text-gray-100">
@@ -615,6 +718,14 @@ export default function SessionsClient({ locale }: { locale: string }) {
                   <td className="py-3 px-4">{s.participants.length}</td>
                   <td className="py-3 px-4 text-right">
                     <button
+                      type="button"
+                      onClick={() => setActiveSessionId(s.id)}
+                      className="mr-2 rounded-lg border border-gray-700 px-3 py-1 text-gray-200 hover:bg-gray-800"
+                      title="Open"
+                    >
+                      ▶
+                    </button>
+                    <button
                       onClick={() => removeSession(s.id)}
                       className="rounded-lg border border-gray-700 px-3 py-1 text-gray-200 hover:bg-gray-800"
                       title={t.del}
@@ -624,6 +735,117 @@ export default function SessionsClient({ locale }: { locale: string }) {
                   </td>
                 </tr>
               ))}
+              {activeSession && (
+  <section className="rounded-2xl border border-gray-800 bg-gray-900 p-4 text-gray-100">
+    <div className="flex items-center justify-between mb-3">
+      <div className="font-medium text-white">
+        Results — {displayName(activeSession)}
+      </div>
+      <button
+        type="button"
+        onClick={() => setActiveSessionId(null)}
+        className="rounded-lg border border-gray-700 px-3 py-1 text-gray-200 hover:bg-gray-800"
+      >
+        Close
+      </button>
+    </div>
+
+    {/* по одному участнику блоками */}
+    <div className="space-y-4">
+      {activeSession.participants.map((p) => {
+        const athlete = athletes.find((a) => a.id === p.athleteId);
+        const res = activeSession.results.find((r) => r.athleteId === p.athleteId);
+        if (!res) return null;
+
+        let running = 0;
+
+        return (
+          <div key={p.athleteId} className="rounded-xl border border-gray-800 bg-gray-950 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-medium text-white">
+                {athlete?.name ?? p.athleteId}
+              </div>
+              <div className="text-xs text-gray-300">
+                target: {p.target}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-gray-800">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-900 text-gray-200">
+                  <tr className="border-b border-gray-800">
+                    <th className="py-2 px-3">Set</th>
+                    <th className="py-2 px-3">Hits</th>
+                    <th className="py-2 px-3">Center</th>
+                    <th className="py-2 px-3">Score</th>
+                    <th className="py-2 px-3">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {res.sets.map((st, i) => {
+                    const disableHits = activeSession.scoringMode === "centerOnly";
+                    const disableCenter = activeSession.scoringMode === "hitsOnly";
+
+                    const score = calcSetScore(activeSession.scoringMode, p.target, st);
+                    running += score;
+
+                    return (
+                      <tr key={i} className={i % 2 === 0 ? "bg-gray-950" : "bg-gray-900/40"}>
+                        <td className="py-2 px-3">{i + 1}</td>
+
+                        <td className="py-2 px-3">
+                          <input
+                            type="number"
+                            min={0}
+                            value={disableHits ? 0 : st.hits}
+                            disabled={disableHits}
+                            onChange={(e) =>
+                              updateSetValue(
+                                activeSession.id,
+                                p.athleteId,
+                                i,
+                                "hits",
+                                Number(e.target.value)
+                              )
+                            }
+                            className="w-20 rounded-lg border border-gray-700 bg-gray-800 text-white px-2 py-1 disabled:opacity-50"
+                          />
+                        </td>
+
+                        <td className="py-2 px-3">
+                          <input
+                            type="number"
+                            min={0}
+                            value={disableCenter ? 0 : st.center}
+                            disabled={disableCenter}
+                            onChange={(e) =>
+                              updateSetValue(
+                                activeSession.id,
+                                p.athleteId,
+                                i,
+                                "center",
+                                Number(e.target.value)
+                              )
+                            }
+                            className="w-20 rounded-lg border border-gray-700 bg-gray-800 text-white px-2 py-1 disabled:opacity-50"
+                          />
+                        </td>
+
+                        <td className="py-2 px-3">{score}</td>
+                        <td className="py-2 px-3 font-medium">{running}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </section>
+)}
+
               {sortedSessions.length === 0 && (
                 <tr>
                   <td className="py-8 px-4 text-gray-400" colSpan={5}>
@@ -638,3 +860,4 @@ export default function SessionsClient({ locale }: { locale: string }) {
     </main>
   );
 }
+
