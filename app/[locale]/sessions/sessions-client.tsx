@@ -29,25 +29,25 @@ type ParticipantResults = {
 
 type SessionParticipant = {
   athleteId: string;
-  target: "head" | "belly";
+  target: ParticipantTarget;
 };
+
+type InputMode = "counts" | "points"; // counts = вводим количества, points = вводим очки
+type ParticipantTarget = "head" | "belly" | "mixed";
 
 type Session = {
   id: string;
   date: string; // YYYY-MM-DD
   title?: string; // optional, but unique if present
   notes?: string;
-  
   results: ParticipantResults[];
-  
   distance: number;
   environment: Environment;
   setsCount: number;
   arrowsPerSet: number;
   scoringMode: ScoringMode;
-
+  inputMode: InputMode;
   participants: SessionParticipant[];
-
   createdAt: string; // ISO
 };
 
@@ -74,6 +74,12 @@ function centerValue(scoringMode: ScoringMode, target: "head" | "belly") {
   if (scoringMode === "hitsOnly") return 0;
   return target === "head" ? 3 : 2;
 }
+
+function resolveTarget(t: ParticipantTarget): "head" | "belly" {
+  // Пока mixed трактуем как head по умолчанию (потом заменим на per-set выбор)
+  return t === "belly" ? "belly" : "head";
+}
+
 
 function hitValue(scoringMode: ScoringMode) {
   return scoringMode === "centerOnly" ? 0 : 1;
@@ -240,33 +246,38 @@ export default function SessionsClient({ locale }: { locale: string }) {
 
   // Sessions list (in-memory)
 const [sessions, setSessions] = useState<Session[]>([]);
-const didLoadSessionsRef = useRef(false);
+const [sessionsReady, setSessionsReady] = useState(false);
 
-// load once (after mount)
 useEffect(() => {
   try {
     const raw = window.localStorage.getItem(SESSIONS_KEY);
     if (!raw) return;
 
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) setSessions(parsed);
+    if (!Array.isArray(parsed)) return;
+
+    const normalized = parsed.map((s: any) => ({
+      ...s,
+      inputMode: s.inputMode ?? "counts",
+    }));
+
+    setSessions(normalized);
   } catch {
     // ignore
   } finally {
-    // важно: ставим флаг ПОСЛЕ попытки загрузки
-    didLoadSessionsRef.current = true;
+    setSessionsReady(true);
   }
 }, []);
 
-// save (only after initial load finished)
+
 useEffect(() => {
-  if (!didLoadSessionsRef.current) return;
+  if (!sessionsReady) return;
   try {
     window.localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
   } catch {
     // ignore
   }
-}, [sessions]);
+}, [sessions, sessionsReady]);
 
   // Form state
   const [date, setDate] = useState(today);
@@ -279,6 +290,8 @@ useEffect(() => {
   const [arrowsPerSet, setArrowsPerSet] = useState<number>(5);
 
   const [mode, setMode] = useState<ScoringMode>(defaultModeForDistance(18));
+
+  const [inputMode, setInputMode] = useState<InputMode>("counts");
   const [modeTouched, setModeTouched] = useState(false);
   useEffect(() => {
     if (!modeTouched) setMode(defaultModeForDistance(distance));
@@ -296,6 +309,7 @@ useEffect(() => {
   );
   const participantsArr = useMemo(() => Object.values(selected), [selected]);
   const needAthletes = participantsArr.length === 0;
+  const targetIrrelevant = mode === "hitsOnly" || mode === "centerOnly";
 
   function toggleAthlete(id: string) {
     setSelected((prev) => {
@@ -306,7 +320,7 @@ useEffect(() => {
     });
   }
 
-  function setTarget(id: string, target: "head" | "belly") {
+  function setTarget(id: string, target: ParticipantTarget) {
     setSelected((prev) => ({
       ...prev,
       [id]: { athleteId: id, target },
@@ -371,6 +385,7 @@ useEffect(() => {
       setsCount: Math.max(1, Math.floor(setsCount)),
       arrowsPerSet: Math.max(1, Math.floor(arrowsPerSet)),
       scoringMode: mode,
+      inputMode,
       participants: participantsArr,
       createdAt: new Date().toISOString(),
       results: participantsArr.map((p) => ({
@@ -519,6 +534,25 @@ function updateSetValue(
               <option value="centerOnly">{t.modeCenterOnly}</option>
             </select>
           </label>
+          
+          <label className="text-sm">
+  <div className="mb-1 text-gray-200 font-medium">
+    {locale === "ru" ? "Режим ввода" : locale === "tr" ? "Giriş modu" : "Input mode"}
+  </div>
+  <select
+    value={inputMode}
+    onChange={(e) => setInputMode(e.target.value as InputMode)}
+    className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white px-3 py-2 outline-none focus:ring focus:ring-gray-600"
+  >
+    <option value="counts">
+      {locale === "ru" ? "Количества (попадания/центр)" : locale === "tr" ? "Sayım (isabet/merkez)" : "Counts (hits/center)"}
+    </option>
+    <option value="points">
+      {locale === "ru" ? "Только очки (свободный ввод)" : locale === "tr" ? "Sadece puan (serbest giriş)" : "Points only (free input)"}
+    </option>
+  </select>
+</label>
+
 
           {/* sets */}
           <label className="text-sm">
@@ -624,30 +658,49 @@ function updateSetValue(
                               </button>
                             </div>
 
-                            <div className="mt-2 flex gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setTarget(p.athleteId, "head")}
-                                className={`flex-1 rounded-lg border px-2 py-1 text-xs ${
-                                  p.target === "head"
-                                    ? "bg-white text-gray-900 border-white"
-                                    : "border-gray-700 text-gray-200 hover:bg-gray-800"
-                                }`}
-                              >
-                                {t.head}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setTarget(p.athleteId, "belly")}
-                                className={`flex-1 rounded-lg border px-2 py-1 text-xs ${
-                                  p.target === "belly"
-                                    ? "bg-white text-gray-900 border-white"
-                                    : "border-gray-700 text-gray-200 hover:bg-gray-800"
-                                }`}
-                              >
-                                {t.belly}
-                              </button>
-                            </div>
+                         <div className="mt-2 flex gap-2">
+  <button
+    type="button"
+    disabled={targetIrrelevant}
+    onClick={() => setTarget(p.athleteId, "head")}
+    className={`flex-1 rounded-lg border px-2 py-1 text-xs ${
+     resolveTarget(p.target) === "head"
+        ? "bg-white text-gray-900 border-white"
+        : "border-gray-700 text-gray-200 hover:bg-gray-800"
+    } ${targetIrrelevant ? "opacity-50 cursor-not-allowed" : ""}`}
+    title={targetIrrelevant ? (locale === "ru" ? "В этом режиме не влияет" : locale === "tr" ? "Bu modda etkisiz" : "Doesn't matter in this mode") : ""}
+  >
+    {t.head}
+  </button>
+
+  <button
+    type="button"
+    disabled={targetIrrelevant}
+    onClick={() => setTarget(p.athleteId, "belly")}
+    className={`flex-1 rounded-lg border px-2 py-1 text-xs ${
+      resolveTarget(p.target) === "belly"
+        ? "bg-white text-gray-900 border-white"
+        : "border-gray-700 text-gray-200 hover:bg-gray-800"
+    } ${targetIrrelevant ? "opacity-50 cursor-not-allowed" : ""}`}
+    title={targetIrrelevant ? (locale === "ru" ? "В этом режиме не влияет" : locale === "tr" ? "Bu modda etkisiz" : "Doesn't matter in this mode") : ""}
+  >
+    {t.belly}
+  </button>
+
+  <button
+    type="button"
+    disabled={targetIrrelevant}
+    onClick={() => setTarget(p.athleteId, "mixed")}
+    className={`flex-1 rounded-lg border px-2 py-1 text-xs ${
+      p.target === "mixed"
+        ? "bg-white text-gray-900 border-white"
+        : "border-gray-700 text-gray-200 hover:bg-gray-800"
+    } ${targetIrrelevant ? "opacity-50 cursor-not-allowed" : ""}`}
+    title={targetIrrelevant ? (locale === "ru" ? "В этом режиме не влияет" : locale === "tr" ? "Bu modda etkisiz" : "Doesn't matter in this mode") : ""}
+  >
+    {locale === "ru" ? "Смеш." : locale === "tr" ? "Karma" : "Mixed"}
+  </button>
+</div>
                           </div>
                         );
                       })}
@@ -766,7 +819,7 @@ function updateSetValue(
                 {athlete?.name ?? p.athleteId}
               </div>
               <div className="text-xs text-gray-300">
-                target: {p.target}
+                target: resolveTarget(p.target)
               </div>
             </div>
 
@@ -786,7 +839,8 @@ function updateSetValue(
                     const disableHits = activeSession.scoringMode === "centerOnly";
                     const disableCenter = activeSession.scoringMode === "hitsOnly";
 
-                    const score = calcSetScore(activeSession.scoringMode, p.target, st);
+                    const score = calcSetScore(activeSession.scoringMode, resolveTarget(p.target), st)
+
                     running += score;
 
                     return (
